@@ -125,6 +125,11 @@ for repeat in tqdm(range(repeats), desc='repeats'):
                 fcs.append(fc)
             fcs = np.array(fcs)
             print(f'scanning {len(fcs)} total frequencies...')
-            for fc in tqdm(fcs, desc='fcs'):
 
-                capture(fc=fc, fs=fs, NFFT=NFFT)
+            for fc in tqdm(fcs, desc='fcs'):
+                try:
+                    capture(fc=fc, fs=fs, NFFT=NFFT)
+                except Exception as e:
+                    print(e)
+                    time.sleep(1)
+                    pass
