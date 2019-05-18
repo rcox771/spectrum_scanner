@@ -1,0 +1,5 @@
+pyrtlsdr
+numpy
+scipy
+matplotlib
+scikit-image
