@@ -50,16 +50,22 @@ def append_json(data, path):
 async def stream(sdr, N):
     samples_buffer = Queue()
     total = 0
-    async for samples in sdr.stream():
-        # do something with samples
-        # ...
-        samples_buffer.put(samples)
-        print(f'put {len(samples)} into buffer')
-        total += len(samples)
-        if total >= N:
-            break
-    # to stop streaming:
-    await sdr.stop()
+    with tqdm(total=N, desc='sampling') as pbar:
+        #for i in range(10):
+        #    time.sleep(0.1)
+
+        async for samples in sdr.stream():
+            # do something with samples
+            # ...
+
+            samples_buffer.put(samples)
+            #print(f'put {len(samples)} into buffer')
+            total += len(samples)
+            pbar.update(len(samples))
+            if total >= N:
+                break
+        # to stop streaming:
+        await sdr.stop()
 
     # done
     sdr.close()

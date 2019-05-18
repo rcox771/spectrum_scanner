@@ -3,8 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+
 # C extensions
 *.so
+
+# data
+sdr_captures
+
 
 # Distribution / packaging
 .Python
