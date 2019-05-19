@@ -3,6 +3,7 @@ from contextlib import closing
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.signal import spectrogram, windows
+from scipy import signal
 from skimage.io import imsave, imread
 from datetime import datetime
 import json
@@ -12,6 +13,10 @@ import time
 from queue import Queue
 import asyncio
 from pathlib import Path
+import warnings
+
+for cat in [RuntimeWarning, UserWarning, FutureWarning]:
+    warnings.filterwarnings("ignore", category=cat) 
 
 
 def split_images(dir="sdr_captures/specs_raw"):
@@ -44,27 +49,22 @@ def split_images(dir="sdr_captures/specs_raw"):
 # y -- spectrogram, nf by nt array
 # dbf -- Dynamic range of the spectrum
 
+def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128, normalize=True):
 
-def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128):
+    #w = windows.hamming(nperseg)
+    #window = signal.kaiser(nperseg, beta=14)
+    
+    f, t, y = spectrogram(y, detrend=None, noverlap=int(nperseg/2), nfft=NFFT, fs=fs)
 
-    w = windows.hamming(nperseg)
-    w /= sum(w)
-    f, t, y = spectrogram(y, nfft=NFFT, window=w, fs=fs)
-    #eps = 10.0**(-dbf / 20.0)  # minimum signal
-    # y = np.fft.fftshift(y, axes=0)
-    # y = np.sqrt(np.power(y.real, 2) + np.power(y.imag, 2))
+    y = np.fft.fftshift(y, axes=0)
+    if normalize:
+        #y = norm_spectrum(y)
+        y = np.sqrt(np.power(y.real, 2) + np.power(y.imag, 2))
+        y = 20 * np.log10(np.abs(y)/ np.abs(y).max())
 
-    # mag = np.abs(y)
-    # y_max = np.max(mag)  #y.median()
 
-    # y = mag / y_max
-    # y_log = 20.0 * np.log10(y)
-
-    # rescale image intensity to 256
-    #plt.figure()
-    #plt.matshow(img)
-    #plt.show()
-    return np.fft.fftshift(y, axes=0)
+    
+    return y
 
 
 def append_json(data, path):
@@ -100,12 +100,10 @@ async def stream(sdr, N):
 def capture(fc=94.3e6,
             fs=int(1e6),
             gain=15,
-            seconds_dwell=2,
-            target_hpb=300,
-            out_dir="sdr_captures/specs_raw",
-            meta_path="sdr_captures/dataset.json"):
+            seconds_dwell=2
+            ):
 
-    os.makedirs(out_dir, exist_ok=True)
+    
     N = int(seconds_dwell * fs)
     with closing(RtlSdr()) as sdr:
         sdr.sample_rate = fs
@@ -117,35 +115,37 @@ def capture(fc=94.3e6,
         loop = asyncio.get_event_loop()
         samples_buffer = loop.run_until_complete(stream(sdr, N))
 
-    iq_samples = np.hstack(np.array(list(samples_buffer.queue)))[:N]
-    print('iq samps: ', iq_samples.shape, iq_samples.dtype)
-    NFFT = closest_power_of_two(fs / target_hpb)
-    #iq_samples, meta = capture(fc=fc, fs=fs, seconds_dwell=seconds_dwell)
-    spec_img = to_spec(iq_samples, fs, fc, NFFT=NFFT)
-    spec_img = norm_spectrum(spec_img)
-    #iq_samples = sdr.read_samples_async()
-    #time.sleep(1)
-
-    path = os.path.join(out_dir, f'{stamp}.png')
+    iq_samples = np.hstack(np.array(list(samples_buffer.queue)))[:N].astype("complex64")
+    
+    #path = os.path.join(out_dir, f'{stamp}.png')
     meta = dict(
         fs=fs,
         fc=fc,
         gain=gain,
         seconds_dwell=seconds_dwell,
-        dt_start=stamp,
-        NFFT=NFFT,
-        path=path)
+        dt_start=stamp
+    )
 
+
+
+    return iq_samples, meta
+
+def save_capture(path, spec_img, meta, meta_path):
     imsave(path, spec_img.T)
     append_json(meta, meta_path)
-    #return iq_samples, meta
 
 
-def scan():
-    low = 80e6
-    high = 1000e6
-    repeats = 10
-    target_hpb = 300
+def scan(
+        low=80e6,
+        high=1000e6,
+        repeats=10,
+        target_hpb=300,
+    ):
+
+    out_dir="sdr_captures/specs_raw",
+    meta_path="sdr_captures/dataset.json"
+
+    os.makedirs(out_dir, exist_ok=True)
     for repeat in tqdm(range(repeats), desc='repeats'):
         for fs in list(map(int, (3e6, 2e6, 1e6))):
             #for NFFT in [1024, 2048, 2048 * 2]:
@@ -160,7 +160,16 @@ def scan():
 
             for fc in tqdm(fcs, desc='fcs'):
                 try:
-                    capture(fc=fc, fs=fs, target_hpb=target_hpb)
+                    iq, meta = capture(fc=fc, fs=fs)
+                    meta['NFFT'] = closest_power_of_two(fs / target_hpb)
+                    meta['hpb'] = fs/meta['NFFT']
+                    spec_img = to_spec(iq, fs, fc, NFFT=meta['NFFT'], normalize=True)
+                    
+                    img_path = os.path.join(out_dir, f"{meta['dt_start']}.png")
+                    save_capture(img_path, spec_img, meta, meta_path)
+            
+
+
                 except Exception as e:
                     print(e)
                     time.sleep(1)
@@ -178,10 +187,10 @@ def norm_spectrum(spec_img):
     spec_img = 20 * np.log10(np.abs(spec_img) / np.max(np.abs(spec_img)))
 
     mid = np.median(spec_img)
-    high = mid + 3
-    low = mid - 30
-    spec_img[spec_img < low] = low
-    spec_img[spec_img > high] = high
+    # high = mid + 30
+    # low = mid - 30
+    # spec_img[spec_img < low] = low
+    # spec_img[spec_img > high] = high
 
     spec_img = np.abs(spec_img)
     spec_img /= spec_img.max()
@@ -194,7 +203,7 @@ def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
     NFFT = closest_power_of_two(fs / target_hpb)
     iq_samples, meta = capture(fc=fc, fs=fs, seconds_dwell=seconds_dwell)
     spec_img = to_spec(iq_samples, fs, fc, NFFT=NFFT)
-    spec_img = norm_spectrum(spec_img)
+    #spec_img = norm_spectrum(spec_img)
     #spec_img = np.abs(spec_img)
     #spec_img /= spec_img.max()
 
@@ -210,4 +219,6 @@ def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
 if __name__ == "__main__":
     #split_images()
     #plot_one()
-    scan()
+    scan(repeats=3)
+    split_images()
+    #plot_one()
