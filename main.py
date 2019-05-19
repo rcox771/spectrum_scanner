@@ -61,7 +61,8 @@ def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128, normalize=True):
         #y = norm_spectrum(y)
         y = np.sqrt(np.power(y.real, 2) + np.power(y.imag, 2))
         y = 20 * np.log10(np.abs(y)/ np.abs(y).max())
-
+        y = np.abs(y)
+        y = y / y.max()
 
     
     return y
