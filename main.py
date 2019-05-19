@@ -220,6 +220,6 @@ def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
 if __name__ == "__main__":
     #split_images()
     #plot_one()
-    scan(repeats=3)
+    scan(repeats=3, target_hpb=1000)
     split_images()
     #plot_one()
