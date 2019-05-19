@@ -142,7 +142,7 @@ def scan(
         target_hpb=300,
     ):
 
-    out_dir="sdr_captures/specs_raw",
+    out_dir="sdr_captures/specs_raw"
     meta_path="sdr_captures/dataset.json"
 
     os.makedirs(out_dir, exist_ok=True)
