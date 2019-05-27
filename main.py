@@ -49,6 +49,15 @@ def split_images(dir="sdr_captures/specs_raw"):
 # y -- spectrogram, nf by nt array
 # dbf -- Dynamic range of the spectrum
 
+def adjust_dyn_range(x, mx=3, mn=10, rel_to=np.median):
+    r = rel_to(x)
+    zmax = r+mx
+    zmin = r-mn
+    x[x<zmin] = zmin
+    x[x>zmax] = zmax
+    return x
+
+
 def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128, normalize=True):
 
     #w = windows.hamming(nperseg)
@@ -66,6 +75,48 @@ def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128, normalize=True):
 
     
     return y
+
+from sklearn.preprocessing import MinMaxScaler
+
+def spectrogram(x, fs, fc, m=None, dbf=60):
+
+    if not m:
+        m = 1024
+    
+    isreal_bool = np.isreal(x).all()
+    
+    lx = len(x);
+    nt = (lx + m - 1) // m
+    x = np.append(x,np.zeros(-lx+nt*m))
+    x = x.reshape((int(m/2),nt*2), order='F')
+    x = np.concatenate((x,x),axis=0)
+    x = x.reshape((m*nt*2,1),order='F')
+    x = x[np.r_[m//2:len(x),np.ones(m//2)*(len(x)-1)].astype(int)].reshape((m,nt*2),order='F')
+    xmw = x * windows.hanning(m)[:,None]
+    t_range = [0.0, lx / fs]
+    if isreal_bool:
+        f_range = [ fc, fs / 2.0 + fc]
+        xmf = np.fft.fft(xmw,len(xmw),axis=0)
+        xmf = xmf[0:m/2,:]
+    else:
+        f_range = [-fs / 2.0 + fc, fs / 2.0 + fc]
+        xmf = np.fft.fftshift( np.fft.fft( xmw ,len(xmw),axis=0), axes=0 )
+    f_range = np.linspace(*f_range, xmf.shape[0])
+    t_range = np.linspace(*t_range, xmf.shape[1])
+    xmf = np.sqrt(np.power(xmf.real, 2) + np.power(xmf.imag, 2))
+    xmf = np.abs(xmf)
+    
+    xmf /= xmf.max()
+    xmf = 20 * np.log10(xmf)
+    xmf = np.clip(xmf, -dbf, 0)
+
+    xmf = np.abs(xmf)
+    xmf-=np.mean(xmf)
+    xmf/=xmf.max()
+
+    xmf = MinMaxScaler().fit_transform(xmf)
+    print(xmf.min(), xmf.max())
+    return f_range, t_range, 1-xmf
 
 
 def append_json(data, path):
@@ -100,15 +151,16 @@ async def stream(sdr, N):
 
 def capture(fc=94.3e6,
             fs=int(1e6),
-            gain=15,
-            seconds_dwell=2
+            gain='auto',
+            seconds_dwell=.2
+            #offset_dc=5e4
             ):
 
     
     N = int(seconds_dwell * fs)
     with closing(RtlSdr()) as sdr:
         sdr.sample_rate = fs
-        sdr.center_freq = fc
+        sdr.center_freq = fc# + int(offset_dc)
         sdr.gain = gain
         t = datetime.now()
         stamp = datetime.timestamp(t)
@@ -117,7 +169,7 @@ def capture(fc=94.3e6,
         samples_buffer = loop.run_until_complete(stream(sdr, N))
 
     iq_samples = np.hstack(np.array(list(samples_buffer.queue)))[:N].astype("complex64")
-    
+    #iq_samples = shift_mix(iq_samples, -offset_dc, fs)
     #path = os.path.join(out_dir, f'{stamp}.png')
     meta = dict(
         fs=fs,
@@ -130,6 +182,10 @@ def capture(fc=94.3e6,
 
 
     return iq_samples, meta
+
+def shift_mix(x, hz, fs):
+    return x*np.exp(1j*2*np.pi*hz/fs*np.arange(len(x)))
+
 
 def save_capture(path, spec_img, meta, meta_path):
     imsave(path, spec_img.T)
@@ -154,7 +210,7 @@ def scan(
             fcs = []
             fc = low
             while fc < high:
-                fc += int((fs / 5))
+                fc += int((fs * (2/3.)))
                 fcs.append(fc)
             fcs = np.array(fcs)
             print(f'scanning {len(fcs)} total frequencies...')
@@ -164,7 +220,7 @@ def scan(
                     iq, meta = capture(fc=fc, fs=fs)
                     meta['NFFT'] = closest_power_of_two(fs / target_hpb)
                     meta['hpb'] = fs/meta['NFFT']
-                    spec_img = to_spec(iq, fs, fc, NFFT=meta['NFFT'], normalize=True)
+                    ff, tt, spec_img = spectrogram(iq, fs, fc, m=meta['NFFT'])
                     
                     img_path = os.path.join(out_dir, f"{meta['dt_start']}.png")
                     save_capture(img_path, spec_img, meta, meta_path)
@@ -220,6 +276,6 @@ def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
 if __name__ == "__main__":
     #split_images()
     #plot_one()
-    scan(repeats=3, target_hpb=1000)
+    scan(repeats=1, target_hpb=3000)
     split_images()
     #plot_one()
