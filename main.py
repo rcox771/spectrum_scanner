@@ -152,7 +152,7 @@ async def stream(sdr, N):
 def capture(fc=94.3e6,
             fs=int(1e6),
             gain='auto',
-            seconds_dwell=.2
+            seconds_dwell=.4
             #offset_dc=5e4
             ):
 
@@ -210,7 +210,7 @@ def scan(
             fcs = []
             fc = low
             while fc < high:
-                fc += int((fs * (2/3.)))
+                fc += int((fs * (1/3.)))
                 fcs.append(fc)
             fcs = np.array(fcs)
             print(f'scanning {len(fcs)} total frequencies...')
