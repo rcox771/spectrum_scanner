@@ -76,7 +76,7 @@ def to_spec(y, fs, fc, NFFT=1024, dbf=60, nperseg=128, normalize=True):
     
     return y
 
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 def spectrogram(x, fs, fc, m=None, dbf=60):
 
@@ -92,7 +92,7 @@ def spectrogram(x, fs, fc, m=None, dbf=60):
     x = np.concatenate((x,x),axis=0)
     x = x.reshape((m*nt*2,1),order='F')
     x = x[np.r_[m//2:len(x),np.ones(m//2)*(len(x)-1)].astype(int)].reshape((m,nt*2),order='F')
-    xmw = x * windows.hanning(m)[:,None]
+    xmw = x * windows.hamming(m)[:,None]
     t_range = [0.0, lx / fs]
     if isreal_bool:
         f_range = [ fc, fs / 2.0 + fc]
@@ -103,20 +103,28 @@ def spectrogram(x, fs, fc, m=None, dbf=60):
         xmf = np.fft.fftshift( np.fft.fft( xmw ,len(xmw),axis=0), axes=0 )
     f_range = np.linspace(*f_range, xmf.shape[0])
     t_range = np.linspace(*t_range, xmf.shape[1])
+
+    h = xmf.shape[0]
+    each = int(h*.10)
+    xmf = xmf[each:-each, :]
+
     xmf = np.sqrt(np.power(xmf.real, 2) + np.power(xmf.imag, 2))
     xmf = np.abs(xmf)
     
     xmf /= xmf.max()
+
+    #throw away sides
+
     xmf = 20 * np.log10(xmf)
     xmf = np.clip(xmf, -dbf, 0)
-
+    xmf = MinMaxScaler().fit_transform(StandardScaler(with_mean=True, with_std=True).fit_transform(xmf))
     xmf = np.abs(xmf)
-    xmf-=np.mean(xmf)
+    #xmf-=np.median(xmf)
     xmf/=xmf.max()
 
-    xmf = MinMaxScaler().fit_transform(xmf)
+    
     print(xmf.min(), xmf.max())
-    return f_range, t_range, 1-xmf
+    return f_range, t_range, xmf
 
 
 def append_json(data, path):
@@ -204,7 +212,7 @@ def scan(
 
     os.makedirs(out_dir, exist_ok=True)
     for repeat in tqdm(range(repeats), desc='repeats'):
-        for fs in list(map(int, (3e6, 2e6, 1e6))):
+        for fs in [int(3.2e6)]:#list(map(int, (3.2e6, 2e6, 1e6))):
             #for NFFT in [1024, 2048, 2048 * 2]:
 
             fcs = []
@@ -254,6 +262,23 @@ def norm_spectrum(spec_img):
     print('spec max:', spec_img.max(), 'spec min:', spec_img.min())
     return spec_img
 
+def parse_measure(s):
+    s = s.lower()
+    if s[-1].isalpha():
+        h, mod = float(s[:-1]), s[-1]
+        if mod == 'm':
+            h*=1e6
+        elif mod == 'k':
+            h*=1e3
+    else:
+        h = int(s)
+    return h
+
+def string_to_linspace(s, delim=':'):
+    return np.arange(*list(map(parse_measure, s.split(delim))))
+
+#string_to_linspace('24M:28M:3M')
+
 
 def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
 
@@ -276,6 +301,6 @@ def plot_one(fc=94.3 * 1e6, fs=3e6, target_hpb=300, seconds_dwell=.2):
 if __name__ == "__main__":
     #split_images()
     #plot_one()
-    scan(repeats=1, target_hpb=3000)
+    scan(repeats=3, target_hpb=1500)
     split_images()
     #plot_one()
