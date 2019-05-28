@@ -241,6 +241,45 @@ def scan(
                     pass
 
 
+def get_optimal_fs(max_fs=3e6):
+    fss = np.array([np.power(2,i) for i in range(30)])
+    fss = fss[fss<=max_fs][-1]
+    return fss
+
+
+def optimal_scan(
+        min_freq=80e6,
+        max_freq=107e6,
+        fs=3e6,
+        hpb_target=4096
+
+    ):
+    fs2 = get_optimal_fs(fs)
+    if fs2!=fs:
+        print(f'optimal fs found: {fs2}, original: {fs}')
+        fs = fs2
+        del fs2
+
+    n_bins = closest_power_of_two(fs / hpb_target)
+    print(f'given hz per bin target: {hpb_target} -> nfft bins per sweep: {n_bins}')
+    assert fs == hpb_target * n_bins
+    print(f'{fs} = {hpb_target} * {n_bins}')
+    
+    diff_bw = max_freq-min_freq
+    sweeps = np.ceil(diff_bw/fs) + 1
+    sweep_bw = sweeps * fs
+    delta_bw = sweep_bw - diff_bw
+    adjusted_min_freq = min_freq - int(delta_bw//2)
+    adjusted_max_freq = max_freq + int(delta_bw//2)
+    assert (adjusted_max_freq-adjusted_min_freq) == sweep_bw
+    print(f'optimal min/max frequecies: {adjusted_min_freq}/{adjusted_max_freq}')
+    min_freq = adjusted_min_freq
+    max_freq = adjusted_max_freq
+
+    freq_bins = np.arange(n_bins*sweeps)
+    fz = np.arange(min_freq, max_freq, hpb_target).astype(int)
+    return freq_bins, fz
+
 def closest_power_of_two(number):
     # Returns next power of two following 'number'
     n = np.ceil(np.log2(number))
